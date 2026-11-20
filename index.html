@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0d0f">
+  <meta name="description" content="A basketball film-room game: freeze real Warriors possessions and make the read.">
+  <title>Dime</title>
+</head>
+<body>
+  <div id="stage"></div>
+  <div class="flash" id="flash"></div>
+
+  <header class="hud top">
+    <div>
+      <p class="kicker" id="kicker"></p>
+      <h1 class="title" id="title"></h1>
+      <ol class="bars" id="bars" aria-label="Plays in this session"></ol>
+    </div>
+    <div class="clock" id="clock" aria-live="polite"></div>
+  </header>
+  <footer class="hud bottom"><div class="panel" id="panel" aria-live="polite"></div></footer>
+
+  <section class="screen" id="start" hidden>
+    <div class="screen_inner">
+      <p class="wordmark">Dime</p>
+      <p class="tagline">Real Warriors possessions, frozen at the pass. Find the open man.</p>
+      <div class="session">
+        <p class="kicker">Film session 1 · 5 plays</p>
+        <p class="session_title" id="sessionTitle"></p>
+        <p class="session_game" id="sessionGame"></p>
+      </div>
+      <button type="button" class="go" id="begin">Start session</button>
+      <p class="credit">Player tracking from the NBA's 2015–16 SportVU data, shared for research. Not affiliated with the NBA or the Warriors.</p>
+    </div>
+  </section>
+
+  <section class="screen" id="end" hidden>
+    <div class="screen_inner">
+      <p class="kicker">Session complete</p>
+      <p class="end_title" id="endTitle"></p>
+      <p class="end_score"><b id="endScore"></b> stars</p>
+      <ol class="end_list" id="endList"></ol>
+      <button type="button" class="go" id="again">Run it back</button>
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

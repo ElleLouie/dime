@@ -1,0 +1,5 @@
+node_modules
+dist
+# raw tracking files are large; only the built sessions are kept
+data/raw
+__pycache__

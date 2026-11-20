@@ -1,0 +1,417 @@
+/* Dime: a dark, spotlit film room with one color, lemon, for open space and good reads. */
+
+:root {
+  --black: #0d0d0f;
+  --panel: #1b1b1f;
+  --line: #2e2e34;
+  --text: #f4f4f5;
+  --muted: #8d8d96;
+  --soft: #c9c9cf;
+  --lemon: #f7eb4f;
+  --font: 'Barlow Condensed', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--black);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  touch-action: manipulation;
+}
+
+#stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* the heads-up display over the court */
+.hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  padding: 16px;
+  pointer-events: none;
+}
+
+.hud > * {
+  pointer-events: auto;
+}
+
+.top {
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: 40px;
+  background: linear-gradient(#0d0d0fee, #0d0d0f00);
+}
+
+.kicker {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 2px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+/* one bar per play: lemon for 3 stars, dimmer for fewer */
+.bars {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bars li {
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.bars .now {
+  background: var(--text);
+}
+
+.bars .s3 { background: var(--lemon); }
+.bars .s2 { background: #b8ae3a; }
+.bars .s1 { background: #6e6930; }
+.bars .s0 { background: #4a4a52; }
+
+.clock {
+  flex-shrink: 0;
+  min-width: 78px;
+  padding: 6px 10px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: center;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 200ms, transform 300ms cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+
+.clock.on {
+  opacity: 1;
+  transform: none;
+}
+
+.clock small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.clock b {
+  display: block;
+  color: var(--lemon);
+  font-size: 34px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock.hurry b {
+  color: var(--text);
+}
+
+.bottom {
+  bottom: 0;
+  padding-top: 60px;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  background: linear-gradient(#0d0d0f00, #0d0d0ff2 38%);
+}
+
+.panel {
+  max-width: 520px;
+  margin: 0 auto;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 250ms, transform 350ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.panel.on {
+  opacity: 1;
+  transform: none;
+}
+
+.ask {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.result {
+  padding: 14px 16px;
+  border-left: 4px solid var(--lemon);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.result.low {
+  border-left-color: #6b6b73;
+}
+
+.result h2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.result h2 span {
+  color: var(--lemon);
+  font-size: 22px;
+  letter-spacing: 0.1em;
+}
+
+.result p {
+  margin: 6px 0 0;
+  color: var(--soft);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+button.go {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--lemon);
+  color: var(--black);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+button.go:active {
+  filter: brightness(0.92);
+}
+
+:focus-visible {
+  outline: 2px solid var(--lemon);
+  outline-offset: 3px;
+}
+
+/* a great read: a lemon flash and the points rising */
+.flash {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 40%, #f7eb4f66, transparent 60%);
+}
+
+.flash.on {
+  animation: flash 700ms ease-out;
+}
+
+.big {
+  position: fixed;
+  left: 50%;
+  top: 34%;
+  z-index: 2;
+  color: var(--lemon);
+  font-size: 64px;
+  font-weight: 700;
+  text-shadow: 0 0 30px #f7eb4f88;
+  pointer-events: none;
+  animation: rise 1100ms ease-out both;
+}
+
+@keyframes flash {
+  0% { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+
+@keyframes rise {
+  0% { transform: translate(-50%, -30%); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translate(-50%, -90%); opacity: 0; }
+}
+
+/* start and end screens, over a dimmed court */
+.screen {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  align-items: end;
+  padding: 24px 20px calc(28px + env(safe-area-inset-bottom));
+  background: linear-gradient(#0d0d0f99, #0d0d0ff5 55%);
+}
+
+.screen[hidden] {
+  display: none;
+}
+
+.screen_inner {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.wordmark {
+  margin: 0;
+  color: var(--lemon);
+  font-size: 96px;
+  font-weight: 700;
+  line-height: 0.9;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+.tagline {
+  margin: 10px 0 28px;
+  color: var(--soft);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.session {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.session_title {
+  margin: 4px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.session_game {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.credit {
+  margin: 16px 0 0;
+  color: #5f5f67;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.end_title {
+  margin: 4px 0 0;
+  color: var(--lemon);
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.end_score {
+  margin: 6px 0 18px;
+  color: var(--soft);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.end_score b {
+  color: var(--text);
+  font-size: 30px;
+}
+
+.end_list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.end_list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.end_list span {
+  color: var(--muted);
+}
+
+.end_list b {
+  color: var(--lemon);
+  letter-spacing: 0.1em;
+}
+
+.stars i {
+  color: #3a3a40;
+  font-style: normal;
+}
+
+.stars i.on {
+  color: var(--lemon);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash.on,
+  .big {
+    animation-duration: 1ms;
+  }
+}
