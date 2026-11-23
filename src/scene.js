@@ -48,6 +48,31 @@ const blobTexture = () => {
   return new THREE.CanvasTexture(c);
 };
 
+// The space map: every spot on the floor, shaded by which team would get there first.
+// Lemon where a Warrior is closer, nothing where a defender is; soft at the border.
+const MAP = { x0: -27, z0: -2, w: 54, d: 62, px: 4 };
+function spaceMap(ours, theirs, options) {
+  const c = document.createElement('canvas'); c.width = MAP.w * MAP.px; c.height = MAP.d * MAP.px;
+  const g = c.getContext('2d'); const img = g.createImageData(c.width, c.height);
+  const near = (list, x, z) => list.reduce((m, p) => Math.min(m, Math.hypot(p.x - x, p.z - z)), Infinity);
+  for (let j = 0; j < c.height; j += 1) {
+    for (let i = 0; i < c.width; i += 1) {
+      const x = MAP.x0 + (i + 0.5) / MAP.px; const z = MAP.z0 + (j + 0.5) / MAP.px;
+      const us = near(ours, x, z); const them = near(theirs, x, z);
+      // how far ahead the Warriors are here, softened over a couple of feet
+      const k = Math.min(1, Math.max(0, (them - us + 1) / 3));
+      // brightest around the options, fading with distance from any Warrior
+      const mine = near(options, x, z) <= us + 0.01;
+      const a = k * (mine ? 0.45 : 0.2) * Math.max(0, 1 - us / 16);
+      const o = (j * c.width + i) * 4;
+      img.data[o] = 247; img.data[o + 1] = 235; img.data[o + 2] = 79; img.data[o + 3] = Math.round(a * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 const mat = (color, glow = 0) => new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.05, emissive: color, emissiveIntensity: glow });
 
 export function createCourt(stage, onPick) {
@@ -80,6 +105,12 @@ export function createCourt(stage, onPick) {
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.8, 32, 24), mat(C.ball, 0.25));
   scene.add(ball);
   const lanes = new THREE.Group(); scene.add(lanes);
+  const mapMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const map = new THREE.Mesh(new THREE.PlaneGeometry(MAP.w, MAP.d), mapMat);
+  map.rotation.x = -Math.PI / 2; map.position.set(MAP.x0 + MAP.w / 2, 0.03, MAP.z0 + MAP.d / 2); map.visible = false; scene.add(map);
+  let mapOn = 0;
+  // 0: standing figures, 1: flat discs (the whiteboard view at the decision)
+  let flat = 0; let flatOn = 0;
   const blob = blobTexture();
 
   let play = null;
@@ -143,13 +174,14 @@ export function createCourt(stage, onPick) {
     const s = courtSpot(play, blend(f0.ball[0], f1.ball[0], k), blend(f0.ball[1], f1.ball[1], k));
     const z = blend(f0.ball[2], f1.ball[2], k);
     const air = smooth(4.5, 7, z);
-    const dribble = 1 + Math.abs(Math.sin(t * 7)) * 2.2;
+    const dribble = 1 + Math.abs(Math.sin(t * 7)) * 2.2 * (1 - flat);
     return ballTarget.set(s.x + 1.4 * (1 - air), blend(dribble, z, air), s.z + 0.7 * (1 - air));
   }
 
   // point the camera at an area of the court: as close as the screen's shape allows without cropping it
-  function fit(center, halfW, halfD, margin) {
-    const tilt = new THREE.Vector3(0, 0.6, 0.8).normalize();
+  const TV = new THREE.Vector3(0, 0.6, 0.8).normalize();
+  const OVERHEAD = new THREE.Vector3(0, 0.96, 0.28).normalize();
+  function fit(center, halfW, halfD, margin, tilt = TV) {
     const vf = THREE.MathUtils.degToRad(camera.fov / 2);
     const hf = Math.atan(Math.tan(vf) * camera.aspect);
     const d = Math.max((halfW + margin) / Math.tan(hf), (halfD * tilt.y + margin) / Math.tan(vf), 30);
@@ -176,6 +208,11 @@ export function createCourt(stage, onPick) {
     const number = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.55), new THREE.MeshBasicMaterial({ map: textTexture(play.players[id].jersey, { color: ours ? '#0d0d0f' : '#8d8d96', stroke: null, w: 128 }), transparent: true }));
     number.position.set(0, 3.7, 1.0); facing.add(number);
     body.scale.setScalar(1.55);
+    // the disc it becomes at the decision, number on top
+    const puck = new THREE.Group(); puck.scale.setScalar(0.001); puck.visible = false; root.add(puck);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.55, 0.5, 48), skin); disc.position.y = 0.25; puck.add(disc);
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), new THREE.MeshBasicMaterial({ map: textTexture(play.players[id].jersey, { size: 84, color: ours ? '#0d0d0f' : '#9a9aa3', stroke: null, w: 128, h: 128 }), transparent: true, depthWrite: false }));
+    top.rotation.x = -Math.PI / 2; top.position.y = 0.52; puck.add(top);
     let label = null;
     if (ours) {
       label = new THREE.Sprite(new THREE.SpriteMaterial({ map: textTexture(nameOf(play, id).toUpperCase()), depthTest: false }));
@@ -184,7 +221,7 @@ export function createCourt(stage, onPick) {
     const target = new THREE.Mesh(new THREE.SphereGeometry(3.6, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
     target.position.y = 3; target.userData.id = id; root.add(target); hits.push(target);
     scene.add(root);
-    return { root, body, facing, skin, base: ours ? C.us : C.them, space, ring, label, size: 0, ringOn: 0, phase: (id % 11) * 0.7 };
+    return { root, body, puck, facing, skin, base: ours ? C.us : C.them, space, ring, label, size: 0, ringOn: 0, phase: (id % 11) * 0.7 };
   }
 
   function setLabel(id, text) {
@@ -199,11 +236,19 @@ export function createCourt(stage, onPick) {
   function loop() {
     const dt = Math.min(0.1, clock.getDelta());
     const t = clock.elapsedTime;
-    view.pos.lerp(wanted.pos, 0.05); view.look.lerp(wanted.look, 0.05);
+    const ease = 1 - Math.exp(-dt * 3); view.pos.lerp(wanted.pos, ease); view.look.lerp(wanted.look, ease);
     camera.position.copy(view.pos); camera.lookAt(view.look);
+    flat += (flatOn - flat) * (1 - Math.exp(-dt * 7));
+    mapOn += ((flatOn ? 1 : 0) - mapOn) * (1 - Math.exp(-dt * 5));
+    mapMat.opacity = mapOn; map.visible = mapOn > 0.01;
+    const up = 1 - flat;
     Object.values(tokens).forEach((tk) => {
+      tk.body.scale.set(1.55, 1.55 * Math.max(0.001, up), 1.55);
+      tk.body.visible = up > 0.15;
+      tk.puck.scale.setScalar(Math.max(0.001, flat)); tk.puck.visible = flat > 0.02;
+      if (tk.label) tk.label.position.y = 12.4 * up + 4 * flat;
       tk.facing.rotation.y = Math.atan2(camera.position.x - tk.root.position.x, camera.position.z - tk.root.position.z);
-      tk.body.position.y = Math.sin(t * 3 + tk.phase) * 0.08;
+      tk.body.position.y = Math.sin(t * 3 + tk.phase) * 0.08 * up;
       const s = tk.space.scale.x + (Math.max(0.001, tk.size) - tk.space.scale.x) * 0.12;
       tk.space.scale.setScalar(s); tk.ring.scale.setScalar(s);
       tk.ring.material.opacity = tk.ringOn * (0.6 + Math.sin(t * 5) * 0.3);
@@ -261,18 +306,25 @@ export function createCourt(stage, onPick) {
       pickable = ids;
       const box = new THREE.Box3().setFromPoints([play.passer, ...ids].map((id) => at(id)));
       const center = box.getCenter(new THREE.Vector3()).setY(0).add(new THREE.Vector3(0, 0, 2));
-      fit(center, (box.max.x - box.min.x) / 2, (box.max.z - box.min.z) / 2 + 3, 6);
-      const most = Math.max(...ids.map((id) => play.options[id].space));
+      // room above for the names, which sit on the far side of each disc
+      center.z -= 2;
+      fit(center, (box.max.x - box.min.x) / 2 + 3, (box.max.z - box.min.z) / 2 + 7, 6, OVERHEAD);
+      flatOn = 1;
+      const all = play.frames[frameIndex].players.map(([pid]) => pid);
+      const where = (list) => list.map((pid) => tokens[pid].root.position.clone());
+      mapMat.map?.dispose();
+      mapMat.map = spaceMap(where(all.filter((pid) => play.players[pid].team === 'GSW')), where(all.filter((pid) => play.players[pid].team !== 'GSW')), where(ids));
+      mapMat.needsUpdate = true;
       ids.forEach((id) => {
         const o = play.options[id];
         const tk = tokens[id];
-        tk.size = Math.min(7, Math.max(1.6, o.space * 0.42));
-        tk.space.material.opacity = 0.08 + 0.3 * (o.space / most);
+        tk.size = 2.2; // the ring around the disc; the space itself is on the map
+        tk.space.material.opacity = 0;
         tk.ringOn = 1;
         setLabel(id, `${nameOf(play, id).toUpperCase()} · ${Math.round(o.space)} FT`);
         const a = at(play.passer).setY(0.15); const b = at(id).setY(0.15);
         const lane = new THREE.Mesh(new THREE.PlaneGeometry(0.35, a.distanceTo(b)), new THREE.MeshBasicMaterial({ color: o.blocked ? C.blocked : LEMON, transparent: true, opacity: o.blocked ? 0.5 : 0.85, depthWrite: false }));
-        lane.rotation.x = -Math.PI / 2; lane.rotation.z = -Math.atan2(b.x - a.x, b.z - a.z);
+        lane.rotation.x = -Math.PI / 2; lane.rotation.z = Math.atan2(b.x - a.x, b.z - a.z);
         lane.position.copy(a.clone().lerp(b, 0.5)).setY(0.1);
         lanes.add(lane);
       });
@@ -282,6 +334,7 @@ export function createCourt(stage, onPick) {
     },
     clearOptions(keep = null) {
       pickable = [];
+      flatOn = 0;
       lanes.clear();
       Object.keys(play.options).map(Number).forEach((id) => {
         tokens[id].ringOn = id === keep ? 1 : 0;
