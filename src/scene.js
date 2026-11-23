@@ -77,7 +77,7 @@ export function createCourt(stage, onPick) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 11.5, 12), mat('#2a2a30'));
   pole.position.set(0, 5.75, -1.6); scene.add(pole);
 
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.8, 20, 16), mat(C.ball, 0.25));
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.8, 32, 24), mat(C.ball, 0.25));
   scene.add(ball);
   const lanes = new THREE.Group(); scene.add(lanes);
   const blob = blobTexture();
@@ -86,7 +86,9 @@ export function createCourt(stage, onPick) {
   let tokens = {};
   let hits = [];
   let frameIndex = 0;
+  let playhead = 0; // a frame number with a fraction: positions are blended between tracking frames
   let ballOverride = null;
+  let ballPlaced = false;
   let pickable = [];
 
   const view = { pos: new THREE.Vector3(0, 90, 100), look: new THREE.Vector3(0, 0, 23) };
@@ -96,6 +98,33 @@ export function createCourt(stage, onPick) {
     const s = courtSpot(play, p[1], p[2]);
     return new THREE.Vector3(s.x, 0, s.z);
   };
+
+  // where everyone is at the playhead, between two 25-a-second tracking frames
+  const blend = (a, b, k) => a + (b - a) * k;
+  const smooth = (e0, e1, x) => { const k = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return k * k * (3 - 2 * k); };
+  function framesAt() {
+    const last = play.frames.length - 1;
+    const i = Math.min(Math.floor(playhead), last);
+    return { f0: play.frames[i], f1: play.frames[Math.min(i + 1, last)], k: Math.min(1, playhead - i) };
+  }
+  function placePlayers() {
+    const { f0, f1, k } = framesAt();
+    f0.players.forEach(([id, x, y]) => {
+      const n = f1.players.find(([pid]) => pid === id) ?? [id, x, y];
+      const s = courtSpot(play, blend(x, n[1], k), blend(y, n[2], k));
+      tokens[id]?.root.position.set(s.x, 0, s.z);
+    });
+  }
+  // the ball: dribbled low while it's held, at its real height in the air, blended between the two
+  const ballTarget = new THREE.Vector3();
+  function ballAt(t) {
+    const { f0, f1, k } = framesAt();
+    const s = courtSpot(play, blend(f0.ball[0], f1.ball[0], k), blend(f0.ball[1], f1.ball[1], k));
+    const z = blend(f0.ball[2], f1.ball[2], k);
+    const air = smooth(4.5, 7, z);
+    const dribble = 1 + Math.abs(Math.sin(t * 7)) * 2.2;
+    return ballTarget.set(s.x + 1.4 * (1 - air), blend(dribble, z, air), s.z + 0.7 * (1 - air));
+  }
 
   // point the camera at an area of the court: as close as the screen's shape allows without cropping it
   function fit(center, halfW, halfD, margin) {
@@ -120,8 +149,8 @@ export function createCourt(stage, onPick) {
     // a slim faceless figure with the number on the chest
     const body = new THREE.Group(); root.add(body);
     const skin = mat(ours ? C.us : C.them);
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.95, 3.1, 6, 18), skin); torso.position.y = 3; body.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.85, 20, 16), skin); head.position.y = 6.1; body.add(head);
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.95, 3.1, 12, 48), skin); torso.position.y = 3; body.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.85, 40, 28), skin); head.position.y = 6.1; body.add(head);
     const facing = new THREE.Group(); body.add(facing);
     const number = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.55), new THREE.MeshBasicMaterial({ map: textTexture(play.players[id].jersey, { color: ours ? '#0d0d0f' : '#8d8d96', stroke: null, w: 128 }), transparent: true }));
     number.position.set(0, 3.7, 1.0); facing.add(number);
@@ -147,7 +176,8 @@ export function createCourt(stage, onPick) {
   // --- the animation loop
   const clock = new THREE.Clock();
   function loop() {
-    const t = clock.getElapsedTime();
+    const dt = Math.min(0.1, clock.getDelta());
+    const t = clock.elapsedTime;
     view.pos.lerp(wanted.pos, 0.05); view.look.lerp(wanted.look, 0.05);
     camera.position.copy(view.pos); camera.lookAt(view.look);
     Object.values(tokens).forEach((tk) => {
@@ -158,13 +188,12 @@ export function createCourt(stage, onPick) {
       tk.ring.material.opacity = tk.ringOn * (0.6 + Math.sin(t * 5) * 0.3);
     });
     if (play) {
-      const f = play.frames[frameIndex];
-      if (ballOverride) ball.position.copy(ballOverride);
-      else {
-        const s = courtSpot(play, f.ball[0], f.ball[1]);
-        const held = f.ball[2] < 6;
-        ball.position.set(s.x + (held ? 1.4 : 0), held ? 1 + Math.abs(Math.sin(t * 7)) * 2.2 : f.ball[2], s.z + (held ? 0.7 : 0));
-      }
+      placePlayers();
+      const target = ballOverride ?? ballAt(t);
+      // a jump (a new play, or back from your pass to the real one) glides instead of teleporting
+      if (!ballPlaced || ballOverride || ball.position.distanceTo(target) < 3) ball.position.copy(target);
+      else ball.position.lerp(target, 1 - Math.exp(-dt * 12));
+      ballPlaced = true;
     }
     renderer.render(scene, camera);
     requestAnimationFrame(loop);
@@ -194,17 +223,16 @@ export function createCourt(stage, onPick) {
     load(next) {
       Object.values(tokens).forEach((tk) => scene.remove(tk.root));
       lanes.clear();
-      play = next; tokens = {}; hits = []; frameIndex = 0; ballOverride = null; pickable = [];
+      play = next; tokens = {}; hits = []; frameIndex = 0; playhead = 0; ballOverride = null; ballPlaced = false; pickable = [];
       play.frames[0].players.forEach(([id]) => { tokens[id] = figure(id); });
       this.show(0);
       wide();
     },
+    // move to a frame; `i` can have a fraction, to land between two frames
     show(i) {
-      frameIndex = Math.min(i, play.frames.length - 1);
-      play.frames[frameIndex].players.forEach(([id, x, y]) => {
-        const s = courtSpot(play, x, y);
-        tokens[id]?.root.position.set(s.x, 0, s.z);
-      });
+      playhead = Math.min(Math.max(0, i), play.frames.length - 1);
+      frameIndex = Math.floor(playhead);
+      placePlayers();
     },
     // the decision: push in, show each option's space and lane, and dim the defense
     showOptions() {
@@ -246,16 +274,18 @@ export function createCourt(stage, onPick) {
     pass(id, done) {
       const a = at(play.passer).setY(3); const b = at(id).setY(3);
       const curve = new THREE.QuadraticBezierCurve3(a, a.clone().lerp(b, 0.5).setY(9), b);
-      let s = 0;
-      const fly = () => {
-        s = Math.min(1, s + 0.05);
-        ballOverride = curve.getPoint(s);
+      const start = performance.now();
+      const ms = Math.min(700, 250 + a.distanceTo(b) * 14);
+      const fly = (now) => {
+        const s = Math.min(1, (now - start) / ms);
+        ballOverride = curve.getPoint(1 - (1 - s) ** 2);
         if (s < 1) requestAnimationFrame(fly); else { ballOverride = null; done(); }
       };
-      fly();
+      fly(start);
     },
     wide,
     // where a player is on screen, from 0 to 1 (used by tests)
     screenOf(id) { const v = tokens[id].root.position.clone().setY(3).project(camera); return [(v.x + 1) / 2, (1 - v.y) / 2]; },
+    ballOf() { return ball.position.toArray(); },
   };
 }

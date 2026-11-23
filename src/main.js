@@ -35,22 +35,27 @@ function drawBars() {
   }).join('');
 }
 
-// play frames from one point to another, 25 a second, with the last half second before the decision in slow motion
+// play frames from one point to another, 25 a second, with the last half second before the decision in slow motion.
+// The playhead moves every screen refresh, so players and the ball glide between tracking frames.
 function run(play, from, to, slow, then) {
-  let i = from;
-  const step = () => {
-    court.show(i);
-    i += 1;
-    const slowNow = slow && i > play.decision - 14 && i <= play.decision;
-    if (i <= to) timer = setTimeout(step, slowNow ? 120 : 40);
+  let head = from;
+  let last = performance.now();
+  court.show(head);
+  const step = (now) => {
+    const dt = Math.min(100, Math.max(0, now - last));
+    last = now;
+    const slowNow = slow && head >= play.decision - 14;
+    head = Math.min(to, head + dt / (slowNow ? 120 : 40));
+    court.show(head);
+    if (head < to) timer = requestAnimationFrame(step);
     else then();
   };
-  step();
+  timer = requestAnimationFrame(step);
 }
 
 function startPlay() {
   const play = session.plays[index];
-  clearTimeout(timer);
+  cancelAnimationFrame(timer);
   $('big')?.remove();
   court.load(play);
   $('kicker').textContent = `Film session 1 · Play ${index + 1} of ${session.plays.length} · ${play.clock}`;
@@ -140,6 +145,6 @@ async function init() {
 }
 
 // for automated play-throughs
-window.dime = { pick: (id) => deciding && choose(id), screenOf: (id) => court.screenOf(id), current: () => session.plays[index] };
+window.dime = { pick: (id) => deciding && choose(id), screenOf: (id) => court.screenOf(id), ballOf: () => court.ballOf(), current: () => session.plays[index] };
 
 init();
