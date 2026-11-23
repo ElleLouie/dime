@@ -5,7 +5,7 @@ import { courtSpot, nameOf } from './reads.js';
 export const LEMON = '#f7eb4f';
 const C = {
   floor: '#1d1d21', boards: 'rgba(255,255,255,0.025)', paint: '#26262b', lines: 'rgba(255,255,255,0.5)', key: 'rgba(247,235,79,0.6)',
-  us: '#f4f4f5', them: '#3b3b42', ball: '#e8813a', blocked: '#55555d',
+  us: '#f4f4f5', them: '#3b3b42', dim: '#26262b', ball: '#e8813a', blocked: '#55555d',
 };
 const FONT = 'Barlow Condensed';
 
@@ -94,6 +94,7 @@ export function createCourt(stage, onPick) {
   const view = { pos: new THREE.Vector3(0, 90, 100), look: new THREE.Vector3(0, 0, 23) };
   const wanted = { pos: view.pos.clone(), look: view.look.clone() };
   const at = (id, frame = frameIndex) => {
+    if (frame === frameIndex && tokens[id]) return tokens[id].root.position.clone().setY(0);
     const p = play.frames[frame].players.find(([pid]) => pid === id);
     const s = courtSpot(play, p[1], p[2]);
     return new THREE.Vector3(s.x, 0, s.z);
@@ -114,6 +115,26 @@ export function createCourt(stage, onPick) {
       const s = courtSpot(play, blend(x, n[1], k), blend(y, n[2], k));
       tokens[id]?.root.position.set(s.x, 0, s.z);
     });
+    separate();
+  }
+  // bodies are about 3 ft wide and players often stand closer than that: nudge overlapping figures
+  // apart, for drawing only, so they never pass through each other
+  const GAP = 3.2;
+  function separate() {
+    const list = Object.values(tokens).map((tk) => tk.root.position);
+    for (let pass = 0; pass < 3; pass += 1) {
+      for (let i = 0; i < list.length; i += 1) {
+        for (let j = i + 1; j < list.length; j += 1) {
+          const a = list[i]; const b = list[j];
+          let dx = b.x - a.x; let dz = b.z - a.z;
+          let d = Math.hypot(dx, dz);
+          if (d >= GAP) continue;
+          if (d < 1e-3) { dx = 1; dz = 0; d = 1; }
+          const push = (GAP - d) / 2 / d;
+          a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push;
+        }
+      }
+    }
   }
   // the ball: dribbled low while it's held, at its real height in the air, blended between the two
   const ballTarget = new THREE.Vector3();
@@ -163,7 +184,7 @@ export function createCourt(stage, onPick) {
     const target = new THREE.Mesh(new THREE.SphereGeometry(3.6, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
     target.position.y = 3; target.userData.id = id; root.add(target); hits.push(target);
     scene.add(root);
-    return { root, body, facing, skin, space, ring, label, size: 0, ringOn: 0, phase: (id % 11) * 0.7 };
+    return { root, body, facing, skin, base: ours ? C.us : C.them, space, ring, label, size: 0, ringOn: 0, phase: (id % 11) * 0.7 };
   }
 
   function setLabel(id, text) {
@@ -256,7 +277,7 @@ export function createCourt(stage, onPick) {
         lanes.add(lane);
       });
       play.frames[frameIndex].players.filter(([id]) => play.players[id].team !== 'GSW').forEach(([id]) => {
-        tokens[id].skin.transparent = true; tokens[id].skin.opacity = 0.55;
+        tokens[id].skin.color.set(C.dim);
       });
     },
     clearOptions(keep = null) {
@@ -267,7 +288,7 @@ export function createCourt(stage, onPick) {
         if (id !== keep) tokens[id].size = 0;
         setLabel(id, nameOf(play, id).toUpperCase());
       });
-      Object.values(tokens).forEach((tk) => { tk.skin.opacity = 1; tk.skin.transparent = false; });
+      Object.values(tokens).forEach((tk) => tk.skin.color.set(tk.base));
     },
     resetMarks() { Object.values(tokens).forEach((tk) => { tk.ringOn = 0; tk.size = 0; }); },
     // the pass: the ball arcs from the passer to whoever was picked
