@@ -9,6 +9,61 @@ export function courtSpot(play, x, y) {
 
 export const nameOf = (play, id) => play.players[id].name;
 
+// Who has the ball in each frame, read from the tracking data. The tracked ball jitters around the
+// player holding it (and its height wanders between 3 and 7 ft), so possession is sticky: you keep
+// it until the ball is clearly away from you, and pick it up when it's within reach.
+// Returns, per frame: `holder` (an id, or null while it's loose, e.g. in a pass), `anchor` (the
+// holder, or for loose frames the nearer holder in time) and `loose` (0 to 1, eased over a few frames).
+// Defenders often stand closer to the ball than the man dribbling it, so they count as 2 ft further
+// away: they only take it when they clearly have it (a steal, a rebound).
+export function possession(play, {
+  grab = 3, release = 4.5, ease = 2, guard = 2, blip = 10,
+} = {}) {
+  const offense = play.players?.[play.passer]?.team;
+  const handicap = (id) => (offense && play.players[id]?.team !== offense ? guard : 0);
+  let holder = null;
+  const holders = play.frames.map((f) => {
+    const [bx, by, bz] = f.ball;
+    const dist = (p) => Math.hypot(p[1] - bx, p[2] - by) + handicap(p[0]);
+    const nearest = f.players.reduce((m, p) => (dist(p) < dist(m) ? p : m));
+    const current = holder === null ? null : f.players.find(([id]) => id === holder);
+    if (bz > 10) holder = null; // above everyone's hands: a lob or a shot
+    else if (current && dist(current) <= release) {
+      // stolen or handed off: someone else has it right in their hands and you don't
+      if (nearest[0] !== holder && dist(nearest) < 1.5 && dist(current) > grab) holder = nearest[0];
+    } else holder = dist(nearest) <= grab ? nearest[0] : null;
+    return holder;
+  });
+  // a blip (someone else for under 0.4 s, or a gap in the tracking) between two stretches of the same
+  // player is that player's
+  const runs = [];
+  holders.forEach((h, i) => { if (i && h === holders[i - 1]) runs[runs.length - 1].len += 1; else runs.push({ h, start: i, len: 1 }); });
+  runs.forEach((r, k) => {
+    const before = runs[k - 1]; const after = runs[k + 1];
+    if (before && after && before.h !== null && before.h === after.h && r.len < blip) holders.fill(before.h, r.start, r.start + r.len);
+  });
+  const n = holders.length;
+  const anchor = holders.map((h, i) => {
+    if (h !== null) return h;
+    for (let d = 1; d < n; d += 1) {
+      if (i - d >= 0 && holders[i - d] !== null) return holders[i - d];
+      if (i + d < n && holders[i + d] !== null) return holders[i + d];
+    }
+    return null;
+  });
+  // fully loose while nobody has it, so a pass follows its real path all the way; the easing happens
+  // in the hands, over the last and first few frames of each possession
+  const loose = holders.map((h, i) => {
+    if (h === null) return 1;
+    let gap = Infinity;
+    for (let d = 1; d <= ease; d += 1) {
+      if ((i - d >= 0 && holders[i - d] === null) || (i + d < n && holders[i + d] === null)) { gap = d; break; }
+    }
+    return gap === Infinity ? 0 : 1 - gap / (ease + 1);
+  });
+  return { holder: holders, anchor, loose };
+}
+
 export function question(play) {
   const passer = nameOf(play, play.passer);
   return play.doubled ? `${passer}'s doubled. Who's open?` : `${passer} has it. Make the read.`;
