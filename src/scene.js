@@ -102,8 +102,15 @@ export function createCourt(stage, onPick) {
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 11.5, 12), mat('#2a2a30'));
   pole.position.set(0, 5.75, -1.6); scene.add(pole);
 
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.8, 32, 24), mat(C.ball, 0.25));
+  const BALL_R = 1.05;
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 32, 24), mat(C.ball, 0.35));
   scene.add(ball);
+  // seen through anyone standing in front of it: drawn only where something is closer to the camera
+  const ghost = new THREE.Mesh(ball.geometry, new THREE.MeshBasicMaterial({ color: C.ball, transparent: true, opacity: 0.55, depthWrite: false, depthFunc: THREE.GreaterDepth }));
+  ghost.renderOrder = 5; ball.add(ghost);
+  // its shadow on the floor: sharp and dark when the ball lands, soft and faint when it's high
+  const ballShadow = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 3.2), new THREE.MeshBasicMaterial({ map: blobTexture(), transparent: true, depthWrite: false }));
+  ballShadow.rotation.x = -Math.PI / 2; scene.add(ballShadow);
   const lanes = new THREE.Group(); scene.add(lanes);
   const mapMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const map = new THREE.Mesh(new THREE.PlaneGeometry(MAP.w, MAP.d), mapMat);
@@ -167,15 +174,27 @@ export function createCourt(stage, onPick) {
       }
     }
   }
-  // the ball: dribbled low while it's held, at its real height in the air, blended between the two
+  // the ball: dribbled at the handler's side while it's held, at its real height in the air, blended between the two
   const ballTarget = new THREE.Vector3();
+  const HAND = 5.4; // the top of the dribble, about waist high on the figures
+  const BOUNCES = 2.1; // dribbles a second
+  let dribbleHeld = 0; // 1 while dribbling, for the squash at the floor
+  let dribbleBounce = 1; // 0 at the floor, 1 at the hand
   function ballAt(t) {
     const { f0, f1, k } = framesAt();
     const s = courtSpot(play, blend(f0.ball[0], f1.ball[0], k), blend(f0.ball[1], f1.ball[1], k));
     const z = blend(f0.ball[2], f1.ball[2], k);
     const air = smooth(4.5, 7, z);
-    const dribble = 1 + Math.abs(Math.sin(t * 7)) * 2.2 * (1 - flat);
-    return ballTarget.set(s.x + 1.4 * (1 - air), blend(dribble, z, air), s.z + 0.7 * (1 - air));
+    // a real dribble falls under gravity: a parabola between two floor contacts
+    const p = (t * BOUNCES) % 1;
+    dribbleBounce = 1 - (2 * p - 1) ** 2;
+    dribbleHeld = (1 - air) * (1 - flat);
+    const low = BALL_R + 0.5 * flat; // resting on the disc in the whiteboard view
+    const y = low + (HAND - BALL_R) * dribbleBounce * (1 - flat);
+    // held on the camera's side of the player, a little to the right, so the body never hides it
+    const toCam = Math.atan2(camera.position.x - s.x, camera.position.z - s.z) + 0.7;
+    const side = 2.5 * (1 - air);
+    return ballTarget.set(s.x + Math.sin(toCam) * side, blend(y, z, air), s.z + Math.cos(toCam) * side);
   }
 
   // point the camera at an area of the court: as close as the screen's shape allows without cropping it
@@ -260,6 +279,13 @@ export function createCourt(stage, onPick) {
       if (!ballPlaced || ballOverride || ball.position.distanceTo(target) < 3) ball.position.copy(target);
       else ball.position.lerp(target, 1 - Math.exp(-dt * 12));
       ballPlaced = true;
+      // a little squash as it hits the floor, so each bounce reads
+      const contact = ballOverride ? 0 : dribbleHeld * Math.max(0, 1 - dribbleBounce / 0.12);
+      ball.scale.set(1 + 0.12 * contact, 1 - 0.2 * contact, 1 + 0.12 * contact);
+      const h = Math.max(0, ball.position.y - BALL_R);
+      ballShadow.position.set(ball.position.x, 0.04, ball.position.z);
+      ballShadow.scale.setScalar(0.7 + h / 9);
+      ballShadow.material.opacity = 0.95 * Math.max(0.15, 1 - h / 10);
     }
     renderer.render(scene, camera);
     requestAnimationFrame(loop);
