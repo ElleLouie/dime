@@ -145,6 +145,6 @@ async function init() {
 }
 
 // for automated play-throughs
-window.dime = { pick: (id) => deciding && choose(id), screenOf: (id) => court.screenOf(id), ballOf: () => court.ballOf(), current: () => session.plays[index] };
+window.dime = { pick: (id) => deciding && choose(id), screenOf: (id) => court.screenOf(id), ballOf: () => court.ballOf(), ballState: () => court.ballState(), current: () => session.plays[index] };
 
 init();

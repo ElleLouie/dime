@@ -1,6 +1,6 @@
 // The court in 3D: a spotlit half court, sleek players, the ball, and the space around each option.
 import * as THREE from 'three';
-import { courtSpot, nameOf } from './reads.js';
+import { courtSpot, nameOf, possession } from './reads.js';
 
 export const LEMON = '#f7eb4f';
 const C = {
@@ -127,6 +127,8 @@ export function createCourt(stage, onPick) {
   let playhead = 0; // a frame number with a fraction: positions are blended between tracking frames
   let ballOverride = null;
   let ballPlaced = false;
+  const ballLag = new THREE.Vector3();
+  const lastTarget = new THREE.Vector3();
   let pickable = [];
 
   const view = { pos: new THREE.Vector3(0, 90, 100), look: new THREE.Vector3(0, 0, 23) };
@@ -140,20 +142,27 @@ export function createCourt(stage, onPick) {
 
   // where everyone is at the playhead, between two 25-a-second tracking frames
   const blend = (a, b, k) => a + (b - a) * k;
-  const smooth = (e0, e1, x) => { const k = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return k * k * (3 - 2 * k); };
   function framesAt() {
     const last = play.frames.length - 1;
     const i = Math.min(Math.floor(playhead), last);
     return { f0: play.frames[i], f1: play.frames[Math.min(i + 1, last)], k: Math.min(1, playhead - i) };
   }
-  function placePlayers() {
+  // `dt` eases each figure's nudge (below) in and out over time; without it, the nudge applies at once
+  function placePlayers(dt = null) {
     const { f0, f1, k } = framesAt();
     f0.players.forEach(([id, x, y]) => {
       const n = f1.players.find(([pid]) => pid === id) ?? [id, x, y];
       const s = courtSpot(play, blend(x, n[1], k), blend(y, n[2], k));
       tokens[id]?.root.position.set(s.x, 0, s.z);
     });
+    const raw = Object.values(tokens).map((tk) => tk.root.position.clone());
     separate();
+    // with three players crowded together the nudges can flip from one frame to the next, so they ease
+    const ease = dt === null ? 1 : 1 - Math.exp(-dt * 8);
+    Object.values(tokens).forEach((tk, i) => {
+      tk.nudge.lerp(tk.root.position.clone().sub(raw[i]), ease);
+      tk.root.position.copy(raw[i]).add(tk.nudge);
+    });
   }
   // bodies are about 3 ft wide and players often stand closer than that: nudge overlapping figures
   // apart, for drawing only, so they never pass through each other
@@ -180,21 +189,30 @@ export function createCourt(stage, onPick) {
   const BOUNCES = 2.1; // dribbles a second
   let dribbleHeld = 0; // 1 while dribbling, for the squash at the floor
   let dribbleBounce = 1; // 0 at the floor, 1 at the hand
-  function ballAt(t) {
+  let owner = null; // possession(play): who has the ball, frame by frame
+  const held = new THREE.Vector3();
+  function ballAt() {
     const { f0, f1, k } = framesAt();
+    const i = Math.min(Math.floor(playhead), play.frames.length - 1);
+    const j = Math.min(i + 1, play.frames.length - 1);
+    // loose: where the tracking data has it (a pass in flight)
     const s = courtSpot(play, blend(f0.ball[0], f1.ball[0], k), blend(f0.ball[1], f1.ball[1], k));
     const z = blend(f0.ball[2], f1.ball[2], k);
-    const air = smooth(4.5, 7, z);
-    // a real dribble falls under gravity: a parabola between two floor contacts
-    const p = (t * BOUNCES) % 1;
-    dribbleBounce = 1 - (2 * p - 1) ** 2;
+    const air = blend(owner.loose[i], owner.loose[j], k);
+    // held: dribbled at the side of whoever has it, ignoring the tracking jitter.
+    // Game time, not screen time, so the dribble slows down with the slow motion.
+    const p = ((playhead / 25) * BOUNCES) % 1;
+    dribbleBounce = 1 - (2 * p - 1) ** 2; // a real dribble falls under gravity: a parabola between floor contacts
     dribbleHeld = (1 - air) * (1 - flat);
     const low = BALL_R + 0.5 * flat; // resting on the disc in the whiteboard view
     const y = low + (HAND - BALL_R) * dribbleBounce * (1 - flat);
-    // held on the camera's side of the player, a little to the right, so the body never hides it
-    const toCam = Math.atan2(camera.position.x - s.x, camera.position.z - s.z) + 0.7;
-    const side = 2.5 * (1 - air);
-    return ballTarget.set(s.x + Math.sin(toCam) * side, blend(y, z, air), s.z + Math.cos(toCam) * side);
+    const who = tokens[owner.anchor[k < 0.5 ? i : j]];
+    if (!who) return ballTarget.set(s.x, z, s.z);
+    const at0 = who.root.position;
+    // on the camera's side of the player, a little to the right, so the body never hides it
+    const toCam = Math.atan2(camera.position.x - at0.x, camera.position.z - at0.z) + 0.7;
+    held.set(at0.x + Math.sin(toCam) * 2.5, y, at0.z + Math.cos(toCam) * 2.5);
+    return ballTarget.set(blend(held.x, s.x, air), blend(held.y, z, air), blend(held.z, s.z, air));
   }
 
   // point the camera at an area of the court: as close as the screen's shape allows without cropping it
@@ -240,7 +258,7 @@ export function createCourt(stage, onPick) {
     const target = new THREE.Mesh(new THREE.SphereGeometry(3.6, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
     target.position.y = 3; target.userData.id = id; root.add(target); hits.push(target);
     scene.add(root);
-    return { root, body, puck, facing, skin, base: ours ? C.us : C.them, space, ring, label, size: 0, ringOn: 0, phase: (id % 11) * 0.7 };
+    return { nudge: new THREE.Vector3(), root, body, puck, facing, skin, base: ours ? C.us : C.them, space, ring, label, size: 0, ringOn: 0, phase: (id % 11) * 0.7 };
   }
 
   function setLabel(id, text) {
@@ -273,11 +291,14 @@ export function createCourt(stage, onPick) {
       tk.ring.material.opacity = tk.ringOn * (0.6 + Math.sin(t * 5) * 0.3);
     });
     if (play) {
-      placePlayers();
-      const target = ballOverride ?? ballAt(t);
-      // a jump (a new play, or back from your pass to the real one) glides instead of teleporting
-      if (!ballPlaced || ballOverride || ball.position.distanceTo(target) < 3) ball.position.copy(target);
-      else ball.position.lerp(target, 1 - Math.exp(-dt * 12));
+      placePlayers(dt);
+      const target = ballOverride ?? ballAt();
+      // The ball moves exactly with what it follows. When that jumps (back to the real play after your
+      // pass, or a hitch in the frame rate), the jump becomes an offset that fades out, so it never snaps.
+      if (ballPlaced && lastTarget.distanceTo(target) > 2.5) ballLag.add(lastTarget).sub(target);
+      ballLag.multiplyScalar(Math.exp(-dt * 9));
+      lastTarget.copy(target);
+      ball.position.copy(target).add(ballLag);
       ballPlaced = true;
       // a little squash as it hits the floor, so each bounce reads
       const contact = ballOverride ? 0 : dribbleHeld * Math.max(0, 1 - dribbleBounce / 0.12);
@@ -315,16 +336,18 @@ export function createCourt(stage, onPick) {
     load(next) {
       Object.values(tokens).forEach((tk) => scene.remove(tk.root));
       lanes.clear();
-      play = next; tokens = {}; hits = []; frameIndex = 0; playhead = 0; ballOverride = null; ballPlaced = false; pickable = [];
+      play = next; tokens = {}; hits = []; frameIndex = 0; playhead = 0; ballOverride = null; ballPlaced = false; ballLag.set(0, 0, 0); pickable = [];
       play.frames[0].players.forEach(([id]) => { tokens[id] = figure(id); });
+      owner = possession(play);
       this.show(0);
+      placePlayers();
       wide();
     },
     // move to a frame; `i` can have a fraction, to land between two frames
+    // the figures move there on the next screen refresh (see the loop)
     show(i) {
       playhead = Math.min(Math.max(0, i), play.frames.length - 1);
       frameIndex = Math.floor(playhead);
-      placePlayers();
     },
     // the decision: push in, show each option's space and lane, and dim the defense
     showOptions() {
@@ -387,5 +410,10 @@ export function createCourt(stage, onPick) {
     // where a player is on screen, from 0 to 1 (used by tests)
     screenOf(id) { const v = tokens[id].root.position.clone().setY(3).project(camera); return [(v.x + 1) / 2, (1 - v.y) / 2]; },
     ballOf() { return ball.position.toArray(); },
+    // what the ball is following right now (used by tests)
+    ballState() {
+      const i = Math.min(Math.floor(playhead), play.frames.length - 1);
+      return { at: ball.position.toArray(), who: owner.anchor[i] && tokens[owner.anchor[i]] ? tokens[owner.anchor[i]].root.position.toArray() : null, cam: camera.position.toArray(), playhead, holder: owner.holder[i], anchor: owner.anchor[i], loose: owner.loose[i], override: Boolean(ballOverride) };
+    },
   };
 }

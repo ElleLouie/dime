@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  courtSpot, question, ranked, lookFor, whatHappened, verdict, summary, weakness,
+  courtSpot, possession, question, ranked, lookFor, whatHappened, verdict, summary, weakness,
 } from './reads.js';
 
 const play = {
@@ -63,4 +63,26 @@ test('explains a weak option', () => {
 test('sums up a session', () => {
   assert.deepEqual(summary([3, 3, 3, 3, 3], 5), { total: 15, max: 15, title: 'Perfect film session' });
   assert.equal(summary([3, 2, 3, 1, 2], 5).title, 'Sharp eyes');
+});
+
+test('possession: sticky while the tracked ball jitters, loose in a pass, picked up on the catch', () => {
+  const frame = (ball, a, b) => ({ ball, players: [[1, ...a], [2, ...b]] });
+  const p = {
+    frames: [
+      frame([10, 10, 3], [11, 10], [30, 10]), // 1 has it
+      frame([12.5, 11, 6.5], [11, 10], [30, 10]), // jitter, 1.8 ft away and high: still 1's
+      frame([10.5, 9, 3.5], [11, 10], [30, 10]),
+      frame([18, 10, 6], [11, 10], [30, 10]), // the pass
+      frame([24, 10, 6], [11, 10], [30, 10]),
+      frame([29, 10, 5], [11, 10], [30, 10]), // 2 catches it
+      frame([29.5, 10.5, 4], [11, 10], [30, 10]),
+    ],
+  };
+  const { holder, anchor, loose } = possession(p, { ease: 1 });
+  assert.deepEqual(holder, [1, 1, 1, null, null, 2, 2]);
+  assert.deepEqual(anchor, [1, 1, 1, 1, 2, 2, 2]);
+  assert.equal(loose[0], 0);
+  assert.deepEqual(loose.slice(3, 5), [1, 1], 'a pass follows its real path all the way');
+  assert.equal(loose[2], 0.5, 'eases out of the hands just before the pass');
+  assert.equal(loose[5], 0.5, 'and into them on the catch');
 });
